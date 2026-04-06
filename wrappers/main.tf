@@ -1,5 +1,6 @@
 module "wrapper" {
-  source = "../"
+  source = "terraform-aws-modules/ecr/aws"
+  version = "3.2.0"
 
   for_each = var.items
 
