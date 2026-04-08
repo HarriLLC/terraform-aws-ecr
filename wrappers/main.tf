@@ -1,5 +1,5 @@
 module "wrapper" {
-  source = "../"
+  source = "./ecr-module"
 
   for_each = var.items
 
