@@ -11,7 +11,8 @@ private registry.
 - A repository policy — generated from `repository_read_access_arns`,
   `repository_read_write_access_arns` and `repository_lambda_read_access_arns`
   when `create_repository_policy`, otherwise the caller's `repository_policy` —
-  attached when `attach_repository_policy` (private repositories).
+  attached when `attach_repository_policy` on a private repository, always on a
+  public one.
 - `aws_ecr_lifecycle_policy` from `repository_lifecycle_policy` when
   `create_lifecycle_policy` (private repositories).
 - Registry-level settings, each off until enabled: registry policy, pull-through
