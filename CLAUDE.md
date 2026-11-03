@@ -3,6 +3,31 @@
 `terraform-aws-ecr` — a reusable Harri Terraform **module**, published to the HCP
 private registry.
 
+## Published Versions — Read First
+
+- Harri stacks pin `v3.2.11`, through `//wrappers`. `v3.2.10` and `v3.2.11`
+  were tagged on the branch `ENG-23086-support-ECR` (PR #1) before it merged;
+  PR #1 is now merged, so `origin/master` has the same Terraform code as
+  `v3.2.11`. Before that merge, `master` was plain upstream `3.2.0`.
+- A branch cut from `master` before the PR #1 merge (check:
+  `git merge-base --is-ancestor v3.2.11 HEAD`) still has the upstream code and
+  lacks everything below. Merge `origin/master` in before you change Terraform
+  code or tag a release.
+- **Never tag a release from a commit that does not contain `v3.2.11`.** Such a
+  release drops the behaviours below, and every stack call site that relies on
+  them breaks on its next version bump.
+- At `v3.2.11`, compared with upstream `3.2.0`:
+  - `wrappers/main.tf` sources the **public** registry module
+    `terraform-aws-modules/ecr/aws` at `3.2.0`, not `../`. Changes to this repo's
+    root `main.tf` / `variables.tf` do **not** reach wrapper consumers until the
+    wrapper source is changed.
+  - In the wrapper, `repository_name` defaults to the `items` map key (upstream
+    defaults to `""`), so the stacks name each repository by its key.
+  - `wrappers/imports.tf` imports `aws_ecr_repository`, `aws_ecr_repository_policy`
+    and `aws_ecr_lifecycle_policy` for every entry with `enable_import = true`,
+    using the map key as the import ID.
+- Where this guide describes wrapper behaviour, it means `v3.2.11`.
+
 ## What This Module Provisions
 
 - `aws_ecr_repository` (private) or `aws_ecrpublic_repository` (public), chosen
@@ -18,7 +43,8 @@ private registry.
 - Registry-level settings, each off until enabled: registry policy, pull-through
   cache rules, registry scanning configuration, and replication configuration.
 - `wrappers/` calls the module once per entry of `items`, filling unset fields
-  from `defaults` — this is how the `Terraform*Stack` repos consume it.
+  from `defaults` — this is how the Harri stacks consume it. At `v3.2.11` it calls
+  the public registry module, not this repo's root (see above).
 
 ## Registry Source
 
@@ -39,11 +65,53 @@ component "ecr-repositories" {
 ```
 
 A single repository can call the root directly
-(`source = "app.terraform.io/harri/ecr-module/aws"`); it has no required inputs.
+(`source = "app.terraform.io/harri/ecr-module/aws"`). No input is declared
+required, but some are in practice — see **Effectively Required Inputs**.
 
 > Take the current published version from the HCP private registry, or from the
-> `version` pinned beside this `source` in a consumer's `common/resources.tf`.
-> Consumers pin an exact version; ranges are never allowed.
+> `version` pinned beside this `source` in a consumer. Consumers pin an exact
+> version; ranges are never allowed.
+
+## Effectively Required Inputs
+
+Every input has a default, but these fail or misbehave when left at it:
+
+- `enable_import` (wrapper, `v3.2.11`) — `wrappers/imports.tf` reads
+  `v.enable_import` from each `items` entry directly, with no `try()` and no
+  fallback to `defaults`. Every entry must set it (`true` or `false`), or
+  plan fails on the missing attribute.
+- `repository_name` (root) — defaults to `""`, which the provider rejects for a
+  repository. The wrapper fills it from the map key at `v3.2.11`.
+- `repository_lifecycle_policy` — defaults to `""`, but `create_lifecycle_policy`
+  defaults to `true`, so a private repository needs a policy JSON or
+  `create_lifecycle_policy = false`.
+- `repository_policy` — used only when `create_repository_policy = false`.
+  `create_repository_policy` defaults to `true`, and then the module generates
+  the policy from the `*_access_arns` lists and ignores `repository_policy`.
+
+## Replacement Hazards
+
+- These force the repository to be **replaced**, which destroys it together with
+  its images:
+  - changing `repository_name`, which is ForceNew on both `aws_ecr_repository`
+    (`name`) and `aws_ecrpublic_repository` (`repository_name`);
+  - changing `repository_encryption_type` or `repository_kms_key`, because the
+    `encryption_configuration` block is ForceNew. `null` means `AES256`, so
+    `null` and `"AES256"` are the same, but any move to or from `KMS`, or to a
+    different key, replaces the repository;
+  - renaming an `items` map key, which changes the `module.wrapper["<key>"]`
+    address, and at `v3.2.11` also the default name. Add a `moved` block, and
+    set `repository_name` to keep the old name.
+- `repository_force_delete` defaults to `null` (`false`). A destroy or
+  replacement of a repository that still holds images then fails in AWS. Set it
+  to `true` and apply that first, only when losing the images is intended.
+- With `enable_import = true`, the config must match the live repository,
+  including encryption, or the first plan replaces what it just imported.
+  The map key must be the live repository name, and the repository policy and
+  lifecycle policy must exist in AWS, because all three are imported.
+- `wrappers/imports.tf` holds `import` blocks, which Terraform allows only in
+  the root module. That works where `//wrappers` is a stack component's source.
+  A classic `module` block that calls `//wrappers` fails to validate.
 
 ## Required Versions
 
@@ -66,6 +134,7 @@ terraform-aws-ecr/
 ├── examples/repository-template/  # standalone example callers
 ├── modules/repository-template/   # nested submodules
 └── wrappers/                      # for_each wrapper for calling the module many times
+                                   # (+ imports.tf at v3.2.11)
 ```
 
 ## Inputs
@@ -77,7 +146,7 @@ terraform-aws-ecr/
 | `repository_type` | `string` | `"private"` | The type of repository to create. Either `public` or `private` |
 | `region` | `string` | `null` | Region where this resource will be managed. Defaults to the Region set in the provider configuration. |
 | `create_repository` | `bool` | `true` | Determines whether a repository will be created |
-| `repository_name` | `string` | `""` | The name of the repository |
+| `repository_name` | `string` | `""` | The name of the repository. In the wrapper at `v3.2.11` it defaults to the `items` key. Changing it replaces the repository |
 | `repository_image_tag_mutability` | `string` | `"IMMUTABLE"` | The tag mutability setting for the repository. Must be one of: `MUTABLE`, `MUTABLE_WITH_EXCLUSION`, `IMMUTABLE`, or `IMMUTABLE_WITH_EXCLUSION`. Defaults to `IMMUTABLE` |
 | `repository_encryption_type` | `string` | `null` | The encryption type for the repository. Must be one of: `KMS` or `AES256`. Defaults to `AES256` |
 | `repository_kms_key` | `string` | `null` | The ARN of the KMS key to use when encryption_type is `KMS`. If not specified, uses the default AWS managed key for ECR |
@@ -127,7 +196,8 @@ terraform-aws-ecr/
 
 ### Project naming patterns
 
-- The repository is named exactly `repository_name`.
+- The repository is named exactly `repository_name`. Through the wrapper at
+  `v3.2.11`, that is the `items` map key unless the entry sets it.
 - Stacks consume the wrapper, not the root:
   `app.terraform.io/harri/ecr-module/aws//wrappers`, with one `items` entry per
   repository. A field left out of an entry falls back to `defaults`, then to the
