@@ -3,31 +3,6 @@
 `terraform-aws-ecr` — a reusable Harri Terraform **module**, published to the HCP
 private registry.
 
-## Published Versions — Read First
-
-- Harri stacks pin `v3.2.11`, through `//wrappers`. `v3.2.10` and `v3.2.11`
-  were tagged on the branch `ENG-23086-support-ECR` (PR #1) before it merged;
-  PR #1 is now merged, so `origin/master` has the same Terraform code as
-  `v3.2.11`. Before that merge, `master` was plain upstream `3.2.0`.
-- A branch cut from `master` before the PR #1 merge (check:
-  `git merge-base --is-ancestor v3.2.11 HEAD`) still has the upstream code and
-  lacks everything below. Merge `origin/master` in before you change Terraform
-  code or tag a release.
-- **Never tag a release from a commit that does not contain `v3.2.11`.** Such a
-  release drops the behaviours below, and every stack call site that relies on
-  them breaks on its next version bump.
-- At `v3.2.11`, compared with upstream `3.2.0`:
-  - `wrappers/main.tf` sources the **public** registry module
-    `terraform-aws-modules/ecr/aws` at `3.2.0`, not `../`. Changes to this repo's
-    root `main.tf` / `variables.tf` do **not** reach wrapper consumers until the
-    wrapper source is changed.
-  - In the wrapper, `repository_name` defaults to the `items` map key (upstream
-    defaults to `""`), so the stacks name each repository by its key.
-  - `wrappers/imports.tf` imports `aws_ecr_repository`, `aws_ecr_repository_policy`
-    and `aws_ecr_lifecycle_policy` for every entry with `enable_import = true`,
-    using the map key as the import ID.
-- Where this guide describes wrapper behaviour, it means `v3.2.11`.
-
 ## What This Module Provisions
 
 - `aws_ecr_repository` (private) or `aws_ecrpublic_repository` (public), chosen
